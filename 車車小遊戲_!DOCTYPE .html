@@ -1,0 +1,1461 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+    <title>超能賽車足球：極速對決 (v18.013.5 Beta)</title>
+    <!-- 引入字體 -->
+    <link href="https://fonts.googleapis.com/css2?family=Teko:wght@400;600;700&family=Noto+Sans+TC:wght@400;700;900&family=Russo+One&family=Rajdhani:wght@400;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+    
+    <!-- Google Identity Services & API (同步載入) -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <script src="https://apis.google.com/js/api.js" async defer></script>
+
+    <style>
+        /* =========================================
+           全局設定 & UI 樣式 (基於 v18.012.6)
+           ========================================= */
+        :root {
+            --p1-color: #ff4757;
+            --cpu-color: #1e90ff;
+            --neon-green: #00ffcc;
+            --primary-cyan: #00f3ff;
+            --primary-orange: #ff9d00;
+            --dark-bg: rgba(12, 20, 31, 0.95);
+            --hud-font: 'Teko', sans-serif;
+            --ui-font: 'Noto Sans TC', sans-serif;
+            --tech-font: 'Rajdhani', sans-serif;
+            --score-font: 'Russo One', sans-serif;
+            --hud-color: var(--neon-green);
+            --boost-color: #ffaa00;
+        }
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #1a1a2e;
+            font-family: var(--ui-font);
+            user-select: none;
+            touch-action: none;
+        }
+
+        #game-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+
+        /* --- 主選單樣式 (v18.012.5 風格) --- */
+        #main-menu-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            padding-left: 10%;
+            box-sizing: border-box;
+            background: linear-gradient(135deg, #0f1724 0%, #16213e 100%);
+            transition: opacity 0.5s ease;
+        }
+        
+        #main-menu-overlay::before {
+            content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background-image: 
+                linear-gradient(rgba(0, 243, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 243, 255, 0.03) 1px, transparent 1px);
+            background-size: 50px 50px;
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        .menu-container { width: 450px; color: #fff; position: relative; z-index: 2; }
+
+        .game-title-main {
+            font-family: 'Russo One', sans-serif;
+            font-size: 5rem; margin: 0; font-style: italic; text-transform: uppercase;
+            line-height: 0.9;
+            background: linear-gradient(to right, #fff, #00f3ff);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            filter: drop-shadow(0 0 15px rgba(0, 243, 255, 0.4));
+        }
+        
+        .game-subtitle {
+            font-size: 1.5rem; color: var(--primary-orange); font-weight: 900;
+            letter-spacing: 2px; margin-bottom: 40px; text-transform: uppercase;
+            font-family: var(--tech-font);
+        }
+
+        .version-tag {
+            position: absolute; bottom: 20px; right: 20px;
+            color: rgba(255,255,255,0.3); font-size: 12px; font-family: monospace;
+        }
+
+        /* 科技感按鈕 */
+        .tech-btn {
+            width: 100%; padding: 18px 25px; margin-bottom: 12px;
+            background: rgba(0, 243, 255, 0.05);
+            border: 1px solid rgba(0, 243, 255, 0.3);
+            border-left: 4px solid var(--primary-cyan);
+            color: #fff; font-family: var(--ui-font); font-size: 1.2rem; font-weight: 700;
+            text-align: left; cursor: pointer; position: relative; transition: all 0.2s ease;
+            clip-path: polygon(0 0, 100% 0, 100% 80%, 97% 100%, 0 100%);
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .tech-btn:hover:not(.locked) {
+            background: var(--primary-cyan); color: #000;
+            transform: translateX(10px); box-shadow: 0 0 25px rgba(0, 243, 255, 0.4);
+        }
+        .tech-btn.locked {
+            border-color: #444; border-left-color: #666; background: rgba(0,0,0,0.3);
+            color: #777; cursor: not-allowed;
+        }
+        .tech-btn.google-btn { border-color: #4285F4; border-left-color: #4285F4; background: rgba(66, 133, 244, 0.1); }
+        .tech-btn.google-btn:hover { background: #4285F4; color: #fff; }
+        
+        .badge { font-size: 0.7rem; background: var(--primary-orange); color: #000; padding: 2px 6px; border-radius: 2px; font-weight: 900; font-family: var(--tech-font); }
+        
+        /* Google API 狀態燈 */
+        .api-status {
+            display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px;
+            background: #555; /* 預設灰 */
+            box-shadow: 0 0 5px #000;
+        }
+        .api-status.ready { background: #00ff00; box-shadow: 0 0 8px #00ff00; }
+        .api-status.error { background: #ff0000; box-shadow: 0 0 8px #ff0000; }
+
+        .menu-footer { margin-top: 30px; display: flex; gap: 15px; }
+        .icon-btn {
+            background: transparent; border: 1px solid rgba(255,255,255,0.2); color: rgba(255,255,255,0.7);
+            padding: 8px 16px; cursor: pointer; font-family: var(--ui-font); font-weight: bold;
+            font-size: 0.9rem; transition: 0.3s; display: flex; align-items: center; gap: 6px;
+        }
+        .icon-btn:hover { border-color: var(--primary-cyan); color: var(--primary-cyan); background: rgba(0, 243, 255, 0.05); }
+
+        #loading {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: #2c3e50; z-index: 900; display: none;
+            flex-direction: column; justify-content: center; align-items: center;
+            color: white; transition: opacity 0.5s;
+        }
+        .spinner {
+            width: 50px; height: 50px; border: 5px solid #444;
+            border-top-color: var(--neon-green); border-radius: 50%;
+            animation: spin 1s linear infinite; margin-bottom: 20px;
+        }
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+
+        /* --- 設定視窗 (還原 v18.012.6 舊版風格) --- */
+        .modal-overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.65); backdrop-filter: blur(8px);
+            z-index: 2000; display: none; justify-content: center; align-items: center; pointer-events: auto;
+        }
+        
+        .modal-box {
+            background: #2c3e50;
+            border: 1px solid #555;
+            border-radius: 12px;
+            width: 500px;
+            max-width: 90%;
+            padding: 30px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+            border-top: 4px solid var(--neon-green);
+            text-align: center;
+            max-height: 80vh;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        
+        .modal-title { font-size: 24px; font-weight: 900; color: #fff; margin-bottom: 25px; letter-spacing: 1px; }
+        
+        .setting-row { margin-bottom: 20px; }
+        .segmented-label { text-align: left; color: #ccc; font-size: 14px; font-weight: 700; margin-bottom: 8px; display: block; }
+        .segmented-control {
+            display: flex; background: #202c39; padding: 4px; border-radius: 8px;
+            width: 100%; border: 1px solid #444; box-sizing: border-box;
+        }
+        .segment-option {
+            flex: 1; padding: 10px; text-align: center; cursor: pointer; border-radius: 6px;
+            color: #888; font-weight: bold; font-size: 14px; transition: all 0.2s ease; user-select: none;
+        }
+        .segment-option:hover { color: #eee; background: rgba(255,255,255,0.05); }
+        .segment-option.active {
+            background: var(--neon-green); color: #000; box-shadow: 0 2px 10px rgba(0, 255, 204, 0.2);
+        }
+
+        .btn-confirm {
+            width: 100%; padding: 14px; margin-top: 10px;
+            background: linear-gradient(135deg, #00ffcc, #00aa88);
+            border: none; border-radius: 6px; color: #000; font-weight: 900; font-size: 16px;
+            cursor: pointer; transition: 0.2s; box-shadow: 0 4px 15px rgba(0, 255, 204, 0.2);
+            font-family: var(--ui-font);
+        }
+        .btn-confirm:hover { filter: brightness(1.1); transform: translateY(-1px); }
+
+        /* 版本列表樣式 */
+        .version-list { text-align: left; }
+        .version-item {
+            background: rgba(0,0,0,0.2); padding: 15px; border-radius: 8px; margin-bottom: 10px;
+            border-left: 3px solid #777;
+        }
+        .ver-tag { color: var(--neon-green); font-weight: bold; margin-bottom: 4px; display: block;}
+        .ver-desc { font-size: 13px; color: #ccc; line-height: 1.4; white-space: pre-line; }
+
+        /* --- 遊戲內 UI 層 --- */
+        .ui-layer {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 20;
+            display: none; /* 預設隱藏 */
+            flex-direction: column; justify-content: space-between;
+        }
+
+        .header {
+            display: flex; justify-content: space-between; align-items: flex-start;
+            padding: 20px;
+            background: linear-gradient(180deg, rgba(0,0,0,0.4) 0%, transparent 100%);
+        }
+
+        .header-right { display: flex; gap: 10px; pointer-events: auto; }
+
+        .speedometer-container {
+            position: relative; width: 180px;
+            background: linear-gradient(90deg, rgba(0,0,0,0.6), transparent);
+            border-left: 4px solid var(--hud-color);
+            transform: skewX(-15deg); padding: 10px 20px;
+            display: flex; flex-direction: column; justify-content: center;
+            backdrop-filter: blur(2px); transition: all 0.3s;
+        }
+        .speedometer-container.style-minimal {
+            background: rgba(255,255,255,0.1); border-left: 4px solid #fff;
+            transform: none; border-radius: 8px;
+        }
+        .speedometer-container.style-minimal .stat-value { color: #fff; font-family: var(--ui-font); }
+        .speedometer-container.style-racing {
+            border-left: 4px solid #ff3333; background: linear-gradient(90deg, rgba(255,0,0,0.2), transparent);
+        }
+        .speedometer-container.style-racing .stat-value { color: #ff3333; font-style: italic; }
+
+        .speed-info { display: flex; flex-direction: column; }
+        .speed-label { color: #ddd; font-family: var(--ui-font); font-size: 14px; font-weight: 700; letter-spacing: 1px; transform: skewX(15deg); }
+        .style-minimal .speed-label { transform: none; }
+        .speed-value-wrap { transform: skewX(15deg); display: flex; align-items: baseline; }
+        .style-minimal .speed-value-wrap { transform: none; }
+        .stat-value { color: var(--hud-color); font-family: var(--hud-font); font-size: 48px; font-weight: 600; line-height: 0.8; transition: color 0.2s; }
+        .speed-unit { color: #fff; font-size: 16px; margin-left: 5px; font-family: var(--ui-font); font-weight: bold; }
+
+        .boost-meter-wrap { width: 100%; height: 8px; background: rgba(255, 255, 255, 0.2); margin-top: 8px; border-radius: 2px; transform: skewX(15deg); overflow: hidden; position: relative; }
+        .style-minimal .boost-meter-wrap { transform: none; border-radius: 4px; }
+        .boost-bar { width: 100%; height: 100%; background: linear-gradient(90deg, #ff8800, #ffcc00); transform-origin: left; transform: scaleX(1); transition: transform 0.1s linear; box-shadow: 0 0 10px rgba(255, 170, 0, 0.6); }
+        .boost-icon { position: absolute; right: 2px; top: -14px; font-size: 12px; color: var(--boost-color); font-weight: bold; text-shadow: 0 0 5px black; }
+        
+        .scoreboard-container { display: flex; flex-direction: column; align-items: center; pointer-events: auto; transform: translateY(-5px); }
+        .scoreboard { display: flex; align-items: center; justify-content: center; background: linear-gradient(90deg, rgba(255, 71, 87, 0.15), rgba(0,0,0,0.5) 40%, rgba(0,0,0,0.5) 60%, rgba(30, 144, 255, 0.15)); padding: 5px 60px; border-bottom: 1px solid rgba(255,255,255,0.15); border-radius: 0 0 20px 20px; backdrop-filter: blur(4px); }
+        .team-score-box { position: relative; width: 60px; height: 60px; margin: 0 20px; overflow: hidden; }
+        .score-digit { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; font-family: var(--score-font); font-size: 42px; font-style: italic; will-change: transform, opacity; }
+        .p1-color { color: #ff6b6b; text-shadow: 0 0 15px rgba(255, 71, 87, 0.6); }
+        .cpu-color { color: #4facfe; text-shadow: 0 0 15px rgba(30, 144, 255, 0.6); }
+        .slide-out-up { animation: scoreSlideOut 0.5s cubic-bezier(0.4, 0.0, 0.2, 1) forwards; }
+        .slide-in-up { animation: scoreSlideInPop 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+        @keyframes scoreSlideOut { 0% { transform: translateY(0); opacity: 1; } 100% { transform: translateY(-120%); opacity: 0; } }
+        @keyframes scoreSlideInPop { 0% { transform: translateY(120%) scale(0.5); opacity: 0; } 50% { transform: translateY(0) scale(1.6); opacity: 1; filter: brightness(2); } 100% { transform: translateY(0) scale(1); opacity: 1; filter: brightness(1); } }
+        .vs-text { font-family: var(--hud-font); font-size: 24px; color: #ddd; font-style: italic; opacity: 0.8; }
+        
+        .btn-header { background: rgba(255, 255, 255, 0.15); border: 1px solid rgba(255,255,255,0.3); color: #eee; padding: 8px 16px; border-radius: 6px; font-size: 14px; cursor: pointer; font-weight: 700; transition: 0.2s; backdrop-filter: blur(5px); display: flex; align-items: center; gap: 6px; font-family: var(--ui-font); }
+        .btn-header:hover { background: rgba(255, 255, 255, 0.3); border-color: var(--neon-green); color: #fff; }
+
+        #goal-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; pointer-events: none; z-index: 50; opacity: 0; transition: opacity 0.2s; background: rgba(255, 255, 255, 0.2); backdrop-filter: blur(5px); }
+        #goal-text { font-family: 'Russo One', sans-serif; font-size: 120px; color: #fff; text-shadow: 0 0 30px rgba(0,0,0,0.8), 0 0 60px currentColor; transform: scale(0.5); opacity: 0; }
+
+        .world-label { position: absolute; pointer-events: none; display: none; z-index: 10; transform: translate(-50%, -100%); }
+        #p1-label { width: 0; height: 0; border-left: 12px solid transparent; border-right: 12px solid transparent; border-top: 18px solid var(--neon-green); filter: drop-shadow(0 0 8px var(--neon-green)); margin-top: -50px; animation: bounceArrow 1s infinite alternate; }
+        @keyframes bounceArrow { from { transform: translate(-50%, -100%) translateY(0); } to { transform: translate(-50%, -100%) translateY(-8px); } }
+        #cpu-label { font-size: 12px; font-weight: 900; color: #fff; padding: 3px 8px; border-radius: 4px; background: rgba(30, 144, 255, 0.7); border: 1px solid rgba(255,255,255,0.5); margin-top: -40px; }
+
+        .controls-hint { position: absolute; bottom: 20px; left: 20px; background: rgba(0,0,0,0.5); padding: 15px; border-radius: 8px; color: #eee; font-size: 13px; line-height: 1.8; pointer-events: auto; transition: opacity 0.5s ease; opacity: 0.9; backdrop-filter: blur(2px); border-left: 3px solid #fff; z-index: 30; }
+        .controls-hint.faded { opacity: 0.2; }
+        .controls-hint:hover { opacity: 1 !important; }
+        .key-badge { display: inline-block; padding: 1px 6px; margin: 0 3px; background: #555; border-radius: 4px; border-bottom: 2px solid #333; color: #fff; font-weight: bold; font-family: monospace; }
+
+        .touch-interface { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 30; display: none; opacity: 0; transition: opacity 0.3s ease; }
+        body.touch-active .touch-interface { display: block; opacity: 1; }
+        body.touch-active .controls-hint { display: none; }
+        .touch-zone-left { position: absolute; top: 0; left: 0; width: 50%; height: 100%; pointer-events: auto; }
+        .joystick-base { width: 120px; height: 120px; background: radial-gradient(circle, rgba(255,255,255,0.15), transparent 60%); border: 2px solid rgba(255,255,255,0.3); border-radius: 50%; position: absolute; display: none; pointer-events: none; }
+        .joystick-thumb { width: 50px; height: 50px; background: rgba(255,255,255,0.9); border-radius: 50%; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); box-shadow: 0 0 15px rgba(0,0,0,0.5); }
+        .btn-zone { position: absolute; bottom: 0; right: 0; width: 300px; height: 300px; pointer-events: none; }
+        .action-btn { position: absolute; border-radius: 50%; display: flex; flex-direction: column; justify-content: center; align-items: center; color: #fff; font-weight: 900; backdrop-filter: blur(5px); box-shadow: 0 6px 20px rgba(0,0,0,0.4); user-select: none; pointer-events: auto; transition: transform 0.1s; text-shadow: 1px 1px 2px rgba(0,0,0,0.5); }
+        .action-btn:active { transform: scale(0.92); filter: brightness(1.2); }
+        .btn-gas { width: 110px; height: 110px; bottom: 40px; right: 30px; background: linear-gradient(135deg, #f39c12, #e67e22); border: 3px solid rgba(255,255,255,0.4); }
+        .btn-jump { width: 90px; height: 90px; bottom: 150px; right: 80px; background: linear-gradient(135deg, #3498db, #2980b9); border: 3px solid rgba(255,255,255,0.4); }
+        .btn-icon { font-size: 32px; display: block; margin-bottom: 0px; }
+        .btn-label { font-size: 16px; opacity: 1; font-family: var(--ui-font); font-weight: 900; }
+    </style>
+</head>
+<body>
+
+    <!-- 主選單 -->
+    <div id="main-menu-overlay">
+        <div class="menu-container">
+            <h1 class="game-title-main">ROCKET<br>SOCCER</h1>
+            <div class="game-subtitle">極速對決</div>
+            
+            <div class="menu-group">
+                <button class="tech-btn" onclick="startGame('vs-ai')">
+                    <span>單人對決 (VS AI)</span>
+                    <span>▶</span>
+                </button>
+
+                <!-- [修復] Google 登入按鈕 -->
+                <button class="tech-btn google-btn" id="btn-google-login" onclick="handleAuthClick()">
+                    <div style="display: flex; align-items: center;">
+                        <span id="api-indicator" class="api-status"></span> <!-- 狀態燈 -->
+                        <span id="google-btn-text">登入 Google 帳戶 (雲端存檔)</span>
+                    </div>
+                    <span class="badge" id="save-status">未登入</span>
+                </button>
+                
+                <button class="tech-btn locked">
+                    <span>多人連線 (Multiplayer)</span>
+                    <span class="badge">開發中</span>
+                </button>
+            </div>
+
+            <div class="menu-footer">
+                <button class="icon-btn" onclick="openSettings()">
+                    <span>⚙️</span> 遊戲設定
+                </button>
+                <button class="icon-btn" onclick="openVersionHistory()">
+                    <span>📜</span> 版本紀錄
+                </button>
+            </div>
+            
+            <div class="version-tag">v18.013.5 Beta</div>
+        </div>
+    </div>
+
+    <!-- 設定視窗 (經典版) -->
+    <div class="modal-overlay" id="settings-modal">
+        <div class="modal-box">
+            <div class="modal-title">遊戲設定</div>
+            
+            <div class="setting-row">
+                <label class="segmented-label">操控模式</label>
+                <div class="segmented-control" id="opt-control">
+                    <div class="segment-option active" data-val="keyboard">鍵盤控制</div>
+                    <div class="segment-option" data-val="touch">觸控搖桿</div>
+                </div>
+            </div>
+
+            <div class="setting-row">
+                <label class="segmented-label">地板材質風格</label>
+                <div class="segmented-control" id="opt-ground">
+                    <div class="segment-option active" data-val="tech">科技網格</div>
+                    <div class="segment-option" data-val="grass">足球草地</div>
+                    <div class="segment-option" data-val="asphalt">賽道瀝青</div>
+                </div>
+            </div>
+            
+            <div class="setting-row">
+                <label class="segmented-label">足球樣式</label>
+                <div class="segmented-control" id="opt-ball">
+                    <div class="segment-option" data-val="minimal">精簡</div>
+                    <div class="segment-option active" data-val="standard">標準</div>
+                    <div class="segment-option" data-val="tech">科技</div>
+                </div>
+            </div>
+
+            <div class="setting-row">
+                <label class="segmented-label">儀表板風格</label>
+                <div class="segmented-control" id="opt-hud">
+                    <div class="segment-option active" data-val="tech">科技藍</div>
+                    <div class="segment-option" data-val="racing">熱血紅</div>
+                    <div class="segment-option" data-val="minimal">簡約白</div>
+                </div>
+            </div>
+
+             <div class="setting-row">
+                <label class="segmented-label">車子視覺特效</label>
+                <div class="segmented-control" id="opt-vfx">
+                    <div class="segment-option active" data-val="on">開啟</div>
+                    <div class="segment-option" data-val="off">關閉</div>
+                </div>
+            </div>
+
+            <button class="btn-confirm" style="margin-bottom: 10px; background: linear-gradient(135deg, #4285F4, #34A853);" onclick="saveGameToDrive()">☁️ 手動雲端同步</button>
+            <button class="btn-confirm" id="btn-confirm-settings">回到選單/遊戲</button>
+        </div>
+    </div>
+
+    <!-- 版本紀錄視窗 -->
+    <div class="modal-overlay" id="version-modal">
+        <div class="modal-box">
+            <div class="modal-title">開發日誌</div>
+            <div class="version-list" id="changelog-list"></div>
+            <button class="btn-confirm" onclick="document.getElementById('version-modal').style.display='none'">關閉</button>
+        </div>
+    </div>
+
+    <div id="loading">
+        <div class="spinner"></div>
+        <div style="font-size: 18px; font-weight: bold; color: var(--neon-green);">賽道載入中...</div>
+        <div style="font-size: 12px; color: #ccc; margin-top:5px;">初始化物理引擎與 3D 場景</div>
+    </div>
+
+    <div id="game-container"></div>
+    <div id="goal-overlay"><div id="goal-text">GOAL!</div></div>
+    <div id="p1-label" class="world-label"></div>
+    <div id="cpu-label" class="world-label">AI</div>
+
+    <!-- 遊戲 UI -->
+    <div class="ui-layer" id="game-ui">
+        <div class="header">
+            <div class="speedometer-container" id="speedometer">
+                <div class="speed-info">
+                    <div class="speed-label">速度</div>
+                    <div class="speed-value-wrap">
+                        <span id="speed-val" class="stat-value">0</span> <span class="speed-unit">KM/H</span>
+                    </div>
+                </div>
+                <div class="boost-meter-wrap">
+                    <div class="boost-icon">NITRO</div>
+                    <div class="boost-bar" id="boost-bar"></div>
+                </div>
+            </div>
+
+            <div class="scoreboard-container">
+                <div class="scoreboard">
+                    <div class="team-score-box" id="score-p1-box">
+                        <div class="score-digit p1-color">0</div>
+                    </div>
+                    <div class="vs-text">VS</div>
+                    <div class="team-score-box" id="score-cpu-box">
+                        <div class="score-digit cpu-color">0</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="header-right">
+                <button class="btn-header" id="btn-fullscreen">⛶ 全螢幕</button>
+                <button class="btn-header" onclick="openSettings()">⚙️ 設定</button>
+            </div>
+        </div>
+
+        <div class="controls-hint" id="controls-hint">
+            <div><span class="key-badge">W</span><span class="key-badge">S</span> 油門 / 煞車</div>
+            <div><span class="key-badge">A</span><span class="key-badge">D</span> 轉向</div>
+            <div><span class="key-badge">SPACE</span> 跳躍 / 翻身</div>
+            <div><span class="key-badge">SHIFT</span> 氮氣加速 (消耗)</div>
+        </div>
+    </div>
+
+    <!-- 觸控介面 -->
+    <div class="touch-interface">
+        <div class="touch-zone-left" id="touch-zone-left"></div>
+        <div class="joystick-base" id="joystick-base">
+            <div class="joystick-thumb" id="joystick-thumb"></div>
+        </div>
+        <div class="btn-zone">
+            <div class="action-btn btn-jump" id="btn-jump"><span class="btn-icon">▲</span><span class="btn-label">跳躍</span></div>
+            <div class="action-btn btn-gas" id="btn-gas"><span class="btn-icon">⚡</span><span class="btn-label">氮氣</span></div>
+        </div>
+    </div>
+
+<script>
+    const CONFIG = {
+        worldGravity: -30, 
+        carMass: 200,
+        ballMass: 30,
+        enginePower: 2000, 
+        jumpImpulse: 3900, 
+        camHeight: 10.5,
+        camDist: 10,
+        fovSens: 1.3,
+        boostMulti: 2.5,
+        vfxEnabled: true,
+        baseSpeedLimit: 28, 
+        boostConsumption: 40,
+        boostRegen: 3
+    };
+
+    const SETTINGS = {
+        ground: 'tech',
+        hud: 'tech',
+        vfx: 'on',
+        ball: 'standard',
+        control: 'keyboard'
+    };
+
+    const VERSION_DATA = [
+        { ver: "v18.013.5 Beta", desc: "完整代碼庫還原 (基於 v18.012.6)\n修復 Google 登入彈出問題\n增加 API 狀態燈號" },
+        { ver: "v18.012.6 Beta", desc: "還原經典設定介面 (Segmented Control)" },
+        { ver: "v18.012.5 Beta", desc: "新增主選單與版本紀錄" },
+        { ver: "v18.012.4 Beta", desc: "新增追尾視角 (Camera Follow Yaw)" },
+        { ver: "v18.012.3 Beta", desc: "新增 3D 立體球門" },
+        { ver: "v18.012.2 Beta", desc: "手機搖桿修正" },
+        { ver: "v18.012.1 Beta", desc: "自動減速物理" }
+    ];
+
+    let scene, camera, renderer;
+    let world, clock;
+    let playerCar, aiCar, ball;
+    let groundMesh; 
+    let isGoalScored = false;
+    let particles = [];
+    let isGameRunning = false; 
+    
+    let playerData = {
+        totalWins: 0,
+        totalGoals: 0,
+        level: 1
+    };
+
+    const gameState = { scoreP1: 0, scoreAI: 0, gameTime: 0, isTyping: false, p1Boost: 100 };
+    const inputState = { throttle: 0, steer: 0, jump: false, touchJump: false, boost: false, boostBtn: false };
+
+    // --- Google API ---
+    const GOOGLE_CLIENT_ID = '801723208112-qnqkqssaavf3k7gv4r2ai1cgbt11pd4n.apps.googleusercontent.com';
+    const GOOGLE_SCOPES = 'https://www.googleapis.com/auth/drive.appdata';
+    let tokenClient = null;
+    let accessToken = null;
+    let isGoogleReady = false;
+
+    // --- 初始化 ---
+    window.onload = function() {
+        const logList = document.getElementById('changelog-list');
+        VERSION_DATA.forEach(v => {
+            logList.innerHTML += `<div class="version-item"><div class="ver-tag">${v.ver}</div><div class="ver-desc">${v.desc}</div></div>`;
+        });
+        
+        setupSettings(); 
+        
+        // 檢查 Google API 載入
+        setTimeout(checkGoogleLibrary, 500);
+
+        document.getElementById('btn-confirm-settings').onclick = () => {
+            document.getElementById('settings-modal').style.display = 'none';
+        };
+
+        if(/Android|iPhone|iPad/i.test(navigator.userAgent) || window.innerWidth < 800) {
+            document.querySelector('#opt-control [data-val="touch"]').click();
+        }
+
+        document.getElementById('btn-fullscreen').onclick = () => {
+            if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+            else if (document.exitFullscreen) document.exitFullscreen();
+        };
+    };
+
+    // [修復] Google API 檢查與初始化
+    function checkGoogleLibrary() {
+        const indicator = document.getElementById('api-indicator');
+        if (typeof google !== 'undefined' && google.accounts && google.accounts.oauth2) {
+            isGoogleReady = true;
+            if(indicator) indicator.className = 'api-status ready';
+            
+            // 預先初始化 tokenClient (Lazy Init)
+            try {
+                tokenClient = google.accounts.oauth2.initTokenClient({
+                    client_id: GOOGLE_CLIENT_ID,
+                    scope: GOOGLE_SCOPES,
+                    ux_mode: 'popup',
+                    callback: (resp) => {
+                        if (resp.error) {
+                            console.error("Auth Error:", resp);
+                            return;
+                        }
+                        accessToken = resp.access_token;
+                        updateLoginUI(true);
+                        loadGameFromDrive();
+                    },
+                });
+                console.log("Google Token Client Initialized");
+            } catch(e) {
+                console.error("Token Client Init Failed:", e);
+                if(indicator) indicator.className = 'api-status error';
+            }
+        } else {
+            // 還沒載入好，繼續檢查
+            if(indicator) indicator.className = 'api-status';
+            setTimeout(checkGoogleLibrary, 1000);
+        }
+    }
+
+    // [修復] 按鈕點擊處理 (含錯誤提示)
+    window.handleAuthClick = function() {
+        if (!isGoogleReady || !tokenClient) {
+            alert("Google 登入服務尚未就緒，請檢查網路連線或稍後再試。\n(如果看到紅燈，可能是被廣告阻擋器攔截)");
+            // 嘗試強制重試
+            checkGoogleLibrary();
+            return;
+        }
+
+        if (accessToken) {
+             saveGameToDrive(); 
+        } else {
+             // 請求授權
+             try {
+                tokenClient.requestAccessToken();
+             } catch(e) {
+                alert("無法開啟登入視窗，請檢查瀏覽器設定。");
+             }
+        }
+    }
+
+    // --- Google Drive 功能 ---
+    function updateLoginUI(isLoggedIn) {
+        const btnText = document.getElementById('google-btn-text');
+        const badge = document.getElementById('save-status');
+        if (isLoggedIn) {
+            btnText.innerText = `歡迎回來! Lv.${playerData.level}`;
+            badge.innerText = '已連線';
+            badge.style.background = '#4285F4';
+        }
+    }
+
+    async function loadGameFromDrive() {
+        if (!accessToken) return;
+        const statusBadge = document.getElementById('save-status');
+        statusBadge.innerText = '讀取中...';
+        
+        // 載入 GAPI Client 用於 Drive API 操作
+        if (!gapi.client.drive) {
+            await new Promise((resolve) => gapi.load('client', resolve));
+            await gapi.client.init({ discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"] });
+        }
+
+        try {
+            const response = await gapi.client.drive.files.list({
+                q: `name = 'rs_save.json' and 'appDataFolder' in parents`,
+                fields: 'files(id, name)',
+                spaces: 'appDataFolder'
+            });
+
+            const files = response.result.files;
+            if (files && files.length > 0) {
+                const fileId = files[0].id;
+                const file = await gapi.client.drive.files.get({
+                    fileId: fileId,
+                    alt: 'media'
+                });
+                playerData = file.result;
+                updateLoginUI(true);
+                statusBadge.innerText = '已同步';
+            } else {
+                statusBadge.innerText = '新遊戲';
+            }
+        } catch (err) {
+            console.error('Load Error:', err);
+            statusBadge.innerText = '讀取失敗';
+        }
+    }
+
+    async function saveGameToDrive() {
+        if (!accessToken) return;
+        const statusBadge = document.getElementById('save-status');
+        statusBadge.innerText = '儲存中...';
+
+        if (!gapi.client.drive) {
+             await new Promise((resolve) => gapi.load('client', resolve));
+             await gapi.client.init({ discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"] });
+        }
+
+        try {
+            const fileName = 'rs_save.json';
+            const fileContent = JSON.stringify(playerData);
+            
+            const response = await gapi.client.drive.files.list({
+                q: `name = '${fileName}' and 'appDataFolder' in parents`,
+                fields: 'files(id, name)',
+                spaces: 'appDataFolder'
+            });
+
+            const files = response.result.files;
+
+            if (files && files.length > 0) {
+                // Update
+                const fileId = files[0].id;
+                await gapi.client.request({
+                    path: '/upload/drive/v3/files/' + fileId,
+                    method: 'PATCH',
+                    params: { uploadType: 'media' },
+                    body: fileContent
+                });
+            } else {
+                // Create
+                const metadata = {
+                    'name': fileName,
+                    'mimeType': 'application/json',
+                    'parents': ['appDataFolder']
+                };
+                const boundary = '-------314159265358979323846';
+                const delimiter = "\r\n--" + boundary + "\r\n";
+                const close_delim = "\r\n--" + boundary + "--";
+                
+                const multipartRequestBody =
+                    delimiter +
+                    'Content-Type: application/json\r\n\r\n' +
+                    JSON.stringify(metadata) +
+                    delimiter +
+                    'Content-Type: application/json\r\n\r\n' +
+                    fileContent +
+                    close_delim;
+
+                await gapi.client.request({
+                    'path': '/upload/drive/v3/files',
+                    'method': 'POST',
+                    'params': {'uploadType': 'multipart'},
+                    'headers': { 'Content-Type': 'multipart/related; boundary="' + boundary + '"' },
+                    'body': multipartRequestBody
+                });
+            }
+            statusBadge.innerText = '同步完成';
+            setTimeout(() => statusBadge.innerText = '已連線', 2000);
+        } catch (err) {
+            console.error('Save Error:', err);
+            statusBadge.innerText = '儲存失敗';
+            statusBadge.style.background = '#ff3333';
+        }
+    }
+
+    // --- 選單控制 (還原版邏輯) ---
+    window.openSettings = function() {
+        document.getElementById('settings-modal').style.display = 'flex';
+    }
+
+    window.openVersionHistory = function() {
+        document.getElementById('version-modal').style.display = 'flex';
+    }
+
+    window.startGame = function(mode) {
+        document.getElementById('main-menu-overlay').style.opacity = 0;
+        setTimeout(() => {
+            document.getElementById('main-menu-overlay').style.display = 'none';
+            const loading = document.getElementById('loading');
+            loading.style.display = 'flex';
+            loading.style.opacity = 1;
+
+            setTimeout(() => {
+                initGame(); 
+                loading.style.opacity = 0;
+                setTimeout(() => {
+                    loading.style.display = 'none';
+                    document.getElementById('game-ui').style.display = 'flex';
+                }, 500);
+            }, 500);
+        }, 500);
+    }
+
+    // --- 設定邏輯 (還原分段按鈕監聽) ---
+    function setupSettings() {
+        const bindSegment = (id, callback) => {
+            const el = document.getElementById(id);
+            const opts = el.querySelectorAll('.segment-option');
+            opts.forEach(opt => {
+                opt.onclick = () => {
+                    opts.forEach(o => o.classList.remove('active'));
+                    opt.classList.add('active');
+                    callback(opt.dataset.val);
+                };
+            });
+        };
+
+        bindSegment('opt-control', (val) => {
+            if(val === 'touch') document.body.classList.add('touch-active');
+            else document.body.classList.remove('touch-active');
+        });
+
+        // 即時應用材質
+        bindSegment('opt-ground', (val) => { 
+            SETTINGS.ground = val;
+            if(isGameRunning) updateGroundTexture(val); 
+        });
+        
+        bindSegment('opt-ball', (val) => { 
+            SETTINGS.ball = val;
+            if(isGameRunning) updateBallTexture(val); 
+        });
+
+        bindSegment('opt-hud', (val) => {
+            const hud = document.getElementById('speedometer');
+            hud.className = 'speedometer-container'; 
+            if(val === 'minimal') hud.classList.add('style-minimal');
+            if(val === 'racing') hud.classList.add('style-racing');
+        });
+
+        bindSegment('opt-vfx', (val) => CONFIG.vfxEnabled = (val === 'on'));
+    }
+
+    // --- 遊戲核心 ---
+    function initGame() {
+        if(isGameRunning) return;
+        isGameRunning = true;
+
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x2c3e50);
+        scene.fog = new THREE.Fog(0x2c3e50, 30, 200);
+
+        camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.5, 500);
+        camera.position.set(0, CONFIG.camHeight, CONFIG.camDist);
+
+        renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.getElementById('game-container').appendChild(renderer.domElement);
+
+        const ambLight = new THREE.AmbientLight(0xffffff, 0.7);
+        scene.add(ambLight);
+        
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+        dirLight.position.set(-60, 100, 40);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.set(2048, 2048);
+        const d = 120;
+        dirLight.shadow.camera.left = -d; dirLight.shadow.camera.right = d;
+        dirLight.shadow.camera.top = d; dirLight.shadow.camera.bottom = -d;
+        scene.add(dirLight);
+
+        world = new CANNON.World();
+        world.gravity.set(0, CONFIG.worldGravity, 0);
+        world.broadphase = new CANNON.SAPBroadphase(world);
+        
+        setupPhysicsMaterials();
+        createStadium();
+        
+        playerCar = createVehicle(new CANNON.Vec3(0, 3, 30), 0x00ffcc, false);
+        aiCar = createVehicle(new CANNON.Vec3(0, 3, -30), 0xff3366, true);
+        createBall(); 
+
+        setupInputs();
+        
+        // 確保初始材質正確 (從 DOM 讀取狀態)
+        if(document.querySelector('#opt-ground .active')) updateGroundTexture(document.querySelector('#opt-ground .active').dataset.val);
+        if(document.querySelector('#opt-ball .active')) updateBallTexture(document.querySelector('#opt-ball .active').dataset.val);
+
+        window.addEventListener('resize', onResize);
+        clock = new THREE.Clock();
+        requestAnimationFrame(animate);
+    }
+
+    function setupPhysicsMaterials() {
+        const gm = new CANNON.Material(); const wm = new CANNON.Material();
+        const bm = new CANNON.Material(); const ballm = new CANNON.Material();
+
+        world.addContactMaterial(new CANNON.ContactMaterial(wm, gm, { friction: 10.0, restitution: 0.0 }));
+        world.addContactMaterial(new CANNON.ContactMaterial(bm, gm, { friction: 0.0, restitution: 0.0 }));
+        world.addContactMaterial(new CANNON.ContactMaterial(ballm, gm, { friction: 0.4, restitution: 0.75 }));
+        world.addContactMaterial(new CANNON.ContactMaterial(bm, ballm, { friction: 0.3, restitution: 0.6 }));
+        
+        CONFIG.mats = { wheel: wm, body: bm, ball: ballm, ground: gm };
+    }
+
+    function createVehicle(pos, color, isAI) {
+        const chassisShape = new CANNON.Box(new CANNON.Vec3(1.0, 0.4, 2.2));
+        const chassisBody = new CANNON.Body({ mass: CONFIG.carMass, material: CONFIG.mats.body });
+        chassisBody.addShape(chassisShape, new CANNON.Vec3(0, 0.5, 0)); 
+        chassisBody.position.copy(pos);
+        if(isAI) chassisBody.quaternion.setFromAxisAngle(new CANNON.Vec3(0,1,0), Math.PI);
+        chassisBody.angularDamping = 0.5; chassisBody.linearDamping = 0.15;
+
+        const vehicle = new CANNON.RaycastVehicle({
+            chassisBody: chassisBody, indexRightAxis: 0, indexUpAxis: 1, indexForwardAxis: 2
+        });
+
+        const wheelOpts = {
+            radius: 0.55, directionLocal: new CANNON.Vec3(0, -1, 0), suspensionStiffness: 60, suspensionRestLength: 0.7,
+            frictionSlip: 10.0, dampingRelaxation: 2.5, dampingCompression: 4.5, maxSuspensionForce: 100000,
+            rollInfluence: 0.1, axleLocal: new CANNON.Vec3(-1, 0, 0), chassisConnectionPointLocal: new CANNON.Vec3(0, 0, 0),
+            customSlidingRotationalSpeed: -30, useCustomSlidingRotationalSpeed: true
+        };
+
+        const wX = 0.95, wY = 0.5, wZ = 1.4;
+        wheelOpts.chassisConnectionPointLocal.set(wX, wY, -wZ); vehicle.addWheel(wheelOpts);
+        wheelOpts.chassisConnectionPointLocal.set(-wX, wY, -wZ); vehicle.addWheel(wheelOpts);
+        wheelOpts.chassisConnectionPointLocal.set(wX, wY, wZ); vehicle.addWheel(wheelOpts);
+        wheelOpts.chassisConnectionPointLocal.set(-wX, wY, wZ); vehicle.addWheel(wheelOpts);
+
+        vehicle.addToWorld(world);
+
+        const meshGroup = new THREE.Group();
+        const carGeo = new THREE.BoxGeometry(2.0, 0.7, 4.4);
+        const carMat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.3, metalness: 0.7 });
+        const carMesh = new THREE.Mesh(carGeo, carMat);
+        carMesh.position.y = 0.6; carMesh.castShadow = true; meshGroup.add(carMesh);
+
+        const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.5, 2.2), new THREE.MeshStandardMaterial({ color: 0x111 }));
+        cabin.position.set(0, 1.25, -0.3); cabin.castShadow = true; meshGroup.add(cabin);
+        
+        const booster = new THREE.Mesh(new THREE.SphereGeometry(0.3), new THREE.MeshBasicMaterial({ color: 0xffaa00 }));
+        booster.position.set(0, 0.6, 2.3); booster.visible = false; meshGroup.add(booster);
+
+        const headLightContainer = new THREE.Group();
+        const hlL = new THREE.SpotLight(0xffffff, 2.0, 60, 0.6, 0.5, 1);
+        hlL.position.set(0.6, 0.6, -2.1); hlL.target.position.set(0.6, 0.0, -10.0); 
+        headLightContainer.add(hlL); headLightContainer.add(hlL.target);
+        const bulbL = new THREE.Mesh(new THREE.CircleGeometry(0.15, 16), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+        bulbL.position.set(0.6, 0.6, -2.21); bulbL.rotation.y = Math.PI; headLightContainer.add(bulbL);
+
+        const hlR = new THREE.SpotLight(0xffffff, 2.0, 60, 0.6, 0.5, 1);
+        hlR.position.set(-0.6, 0.6, -2.1); hlR.target.position.set(-0.6, 0.0, -10.0);
+        headLightContainer.add(hlR); headLightContainer.add(hlR.target);
+        const bulbR = new THREE.Mesh(new THREE.CircleGeometry(0.15, 16), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+        bulbR.position.set(-0.6, 0.6, -2.21); bulbR.rotation.y = Math.PI; headLightContainer.add(bulbR);
+
+        meshGroup.add(headLightContainer);
+        scene.add(meshGroup);
+
+        const wheelMeshes = [];
+        const wGeo = new THREE.CylinderGeometry(0.55, 0.55, 0.5, 24); wGeo.rotateZ(Math.PI/2);
+        const wMat = new THREE.MeshStandardMaterial({ color: 0x222 });
+        for(let i=0; i<4; i++) {
+            const wm = new THREE.Mesh(wGeo, wMat); wm.castShadow = true; scene.add(wm); wheelMeshes.push(wm);
+            const rim = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.55, 0.1), new THREE.MeshStandardMaterial({color:color}));
+            rim.position.x = i%2===0 ? 0.26 : -0.26; wm.add(rim);
+        }
+
+        return { vehicle, chassisBody, mesh: meshGroup, booster, wheelMeshes, isAI, canJump: true };
+    }
+
+    function createStadium() {
+        const groundBody = new CANNON.Body({ mass: 0, material: CONFIG.mats.ground });
+        groundBody.addShape(new CANNON.Box(new CANNON.Vec3(60, 1, 90))); 
+        groundBody.position.set(0, -1, 0); world.addBody(groundBody);
+
+        groundMesh = new THREE.Mesh(new THREE.PlaneGeometry(120, 180), new THREE.MeshStandardMaterial({ roughness: 0.8 }));
+        groundMesh.rotation.x = -Math.PI/2; groundMesh.receiveShadow = true; scene.add(groundMesh);
+        
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0x444, transparent: true, opacity: 0.5 });
+        const createWall = (w, h, d, x, z) => {
+            const b = new CANNON.Body({ mass: 0 }); b.addShape(new CANNON.Box(new CANNON.Vec3(w/2, 50/2, d/2)));
+            b.position.set(x, 50/2, z); world.addBody(b);
+            const m = new THREE.Mesh(new THREE.BoxGeometry(w, 8, d), wallMat); 
+            m.position.set(x, 4, z); m.castShadow = true; scene.add(m);
+        };
+        createWall(2, 8, 180, 61, 0); createWall(2, 8, 180, -61, 0);
+        createWall(50, 8, 2, 35, 91); createWall(50, 8, 2, -35, 91);
+        createWall(50, 8, 2, 35, -91); createWall(50, 8, 2, -35, -91);
+
+        createGoal(0, -93, 0x1e90ff, 1); 
+        createGoal(0, 93, 0xff4757, -1);
+    }
+
+    function updateGroundTexture(type) {
+        if (!groundMesh) return;
+        const cvs = document.createElement('canvas'); cvs.width=512; cvs.height=512; const ctx=cvs.getContext('2d');
+        if(type === 'tech') {
+            ctx.fillStyle='#222'; ctx.fillRect(0,0,512,512);
+            ctx.strokeStyle='rgba(0,255,204,0.1)'; ctx.lineWidth=2;
+            for(let i=0; i<512; i+=32) { ctx.strokeRect(i,0,1,512); ctx.strokeRect(0,i,512,1); }
+        } else if(type === 'grass') {
+            ctx.fillStyle='#2d5a27'; ctx.fillRect(0,0,512,512);
+            ctx.fillStyle='#366630'; for(let i=0; i<512; i+=16) if(i%32===0) ctx.fillRect(0,i,512,16);
+        } else if(type === 'asphalt') {
+            ctx.fillStyle='#333'; ctx.fillRect(0,0,512,512);
+            ctx.fillStyle='#444'; for(let i=0;i<8000;i++) ctx.fillRect(Math.random()*512,Math.random()*512,2,2);
+        }
+        const tex = new THREE.CanvasTexture(cvs); 
+        tex.wrapS=THREE.RepeatWrapping; tex.wrapT=THREE.RepeatWrapping; 
+        tex.repeat.set(15, 22); tex.anisotropy = 16;
+        groundMesh.material.map = tex; groundMesh.material.needsUpdate = true;
+    }
+    
+    function updateBallTexture(type) {
+        if (!ball || !ball.mesh) return;
+        const cvs = document.createElement('canvas'); cvs.width=512; cvs.height=256; 
+        const ctx=cvs.getContext('2d');
+        let roughness = 0.5, metalness = 0.5, emissive = 0x000000;
+
+        if (type === 'minimal') {
+            ctx.fillStyle='#ddd'; ctx.fillRect(0,0,512,256); 
+            ctx.fillStyle='#222'; ctx.beginPath(); ctx.arc(128,128,50,0,Math.PI*2); ctx.fill(); 
+            ctx.beginPath(); ctx.arc(384,128,50,0,Math.PI*2); ctx.fill();
+        } 
+        else if (type === 'standard') {
+            ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,512,256);
+            ctx.fillStyle='#111';
+            const draws = [[128, 64], [384, 64], [128, 192], [384, 192], [256, 128], [0, 0], [0, 256], [512, 0], [512, 256], [256, 0], [256, 256]];
+            draws.forEach(p => { ctx.beginPath(); ctx.arc(p[0], p[1], 35, 0, Math.PI*2); ctx.fill(); });
+            roughness = 0.7; metalness = 0.1; 
+        } 
+        else if (type === 'tech') {
+            ctx.fillStyle='#000'; ctx.fillRect(0,0,512,256);
+            ctx.strokeStyle='#00ffcc'; ctx.lineWidth = 4;
+            ctx.beginPath();
+            for(let i=0; i<=512; i+=64) { ctx.moveTo(i,0); ctx.lineTo(i,256); }
+            for(let i=0; i<=256; i+=64) { ctx.moveTo(0,i); ctx.lineTo(512,i); }
+            ctx.stroke();
+            ctx.fillStyle = '#00ffcc';
+            ctx.beginPath(); ctx.arc(128, 128, 20, 0, Math.PI*2); ctx.fill();
+            ctx.beginPath(); ctx.arc(384, 128, 20, 0, Math.PI*2); ctx.fill();
+            roughness = 0.2; metalness = 0.9; emissive = 0x004433;
+        }
+
+        const tex = new THREE.CanvasTexture(cvs);
+        ball.mesh.material.map = tex; ball.mesh.material.roughness = roughness;
+        ball.mesh.material.metalness = metalness; ball.mesh.material.emissive.setHex(emissive);
+        ball.mesh.material.needsUpdate = true;
+    }
+
+    // [修改] 創建 3D 球門 (帶深度)
+    function createGoal(x, z, color, dir) {
+        // dir: 1 for blue (Z-), -1 for red (Z+)
+        const frameMat = new THREE.MeshStandardMaterial({ color: color, roughness: 0.2 });
+        const netMat = new THREE.MeshBasicMaterial({ color: color, wireframe: true, transparent: true, opacity: 0.3 });
+        
+        const goalGroup = new THREE.Group();
+        goalGroup.position.set(x, 0, z);
+        
+        // 尺寸定義
+        const width = 22; // 寬度
+        const height = 9; // 高度
+        const depth = 6;  // 深度
+        const thickness = 1; // 門框粗細
+
+        // 1. 視覺 Mesh
+        // 頂樑
+        const topBar = new THREE.Mesh(new THREE.BoxGeometry(width, thickness, thickness), frameMat);
+        topBar.position.set(0, height, 0);
+        goalGroup.add(topBar);
+
+        // 左右門柱
+        const leftPost = new THREE.Mesh(new THREE.BoxGeometry(thickness, height, thickness), frameMat);
+        leftPost.position.set(-width/2 + thickness/2, height/2, 0);
+        goalGroup.add(leftPost);
+
+        const rightPost = new THREE.Mesh(new THREE.BoxGeometry(thickness, height, thickness), frameMat);
+        rightPost.position.set(width/2 - thickness/2, height/2, 0);
+        goalGroup.add(rightPost);
+
+        // 網子結構 (背板與側板)
+        // 調整方向：藍隊(Z-)網子往Z-延伸，紅隊(Z+)網子往Z+延伸
+        const zOffset = dir * -depth/2; 
+
+        // 網子頂部
+        const netTop = new THREE.Mesh(new THREE.BoxGeometry(width, 0.1, depth), netMat);
+        netTop.position.set(0, height, zOffset);
+        goalGroup.add(netTop);
+
+        // 網子背部
+        const netBack = new THREE.Mesh(new THREE.BoxGeometry(width, height, 0.1), netMat);
+        netBack.position.set(0, height/2, dir * -depth);
+        goalGroup.add(netBack);
+
+        // 網子左右
+        const netLeft = new THREE.Mesh(new THREE.BoxGeometry(0.1, height, depth), netMat);
+        netLeft.position.set(-width/2 + thickness/2, height/2, zOffset);
+        goalGroup.add(netLeft);
+
+        const netRight = new THREE.Mesh(new THREE.BoxGeometry(0.1, height, depth), netMat);
+        netRight.position.set(width/2 - thickness/2, height/2, zOffset);
+        goalGroup.add(netRight);
+
+        scene.add(goalGroup);
+
+        // 2. 物理碰撞體 (Barrier to keep ball inside)
+        // 我們需要多個 Body 來圍成一個 U 型，CANNON 不支持凹面體
+        // 這些隱形牆壁防止球穿過網子
+        
+        // 背牆
+        const backWallBody = new CANNON.Body({ mass: 0 });
+        backWallBody.addShape(new CANNON.Box(new CANNON.Vec3(width/2, height/2, 0.5)));
+        backWallBody.position.set(x, height/2, z + (dir * -depth));
+        world.addBody(backWallBody);
+
+        // 左牆 (從門柱延伸到背板)
+        const leftWallBody = new CANNON.Body({ mass: 0 });
+        leftWallBody.addShape(new CANNON.Box(new CANNON.Vec3(0.5, height/2, depth/2)));
+        leftWallBody.position.set(x - width/2, height/2, z + zOffset);
+        world.addBody(leftWallBody);
+
+        // 右牆
+        const rightWallBody = new CANNON.Body({ mass: 0 });
+        rightWallBody.addShape(new CANNON.Box(new CANNON.Vec3(0.5, height/2, depth/2)));
+        rightWallBody.position.set(x + width/2, height/2, z + zOffset);
+        world.addBody(rightWallBody);
+
+        // 頂牆
+        const topWallBody = new CANNON.Body({ mass: 0 });
+        topWallBody.addShape(new CANNON.Box(new CANNON.Vec3(width/2, 0.5, depth/2)));
+        topWallBody.position.set(x, height, z + zOffset);
+        world.addBody(topWallBody);
+    }
+
+    // [修復] 補回 createBall 函數
+    function createBall() {
+        ball = {};
+        ball.body = new CANNON.Body({ mass: CONFIG.ballMass, material: CONFIG.mats.ball, linearDamping: 0.1, angularDamping: 0.1 });
+        ball.body.addShape(new CANNON.Sphere(2.5)); ball.body.position.set(0, 10, 0); world.addBody(ball.body);
+        
+        ball.mesh = new THREE.Mesh(new THREE.SphereGeometry(2.5, 32, 32), new THREE.MeshStandardMaterial());
+        ball.mesh.castShadow = true; scene.add(ball.mesh);
+    }
+
+    function setupInputs() {
+        const keys = {};
+        const hintEl = document.getElementById('controls-hint');
+        let hintFadeTimeout;
+
+        const fadeHintLater = () => {
+            clearTimeout(hintFadeTimeout);
+            hintFadeTimeout = setTimeout(() => {
+                let anyPressed = keys['KeyW'] || keys['KeyA'] || keys['KeyS'] || keys['KeyD'];
+                if (!anyPressed && !gameState.isTyping) hintEl.classList.remove('faded');
+            }, 1000);
+        };
+
+        document.addEventListener('keydown', e => {
+            keys[e.code] = true;
+            if (['KeyW','KeyA','KeyS','KeyD'].includes(e.code)) { 
+                gameState.isTyping = true; hintEl.classList.add('faded'); clearTimeout(hintFadeTimeout); 
+            }
+        });
+        document.addEventListener('keyup', e => {
+            keys[e.code] = false;
+            let anyPressed = keys['KeyW'] || keys['KeyA'] || keys['KeyS'] || keys['KeyD'];
+            if (!anyPressed) { gameState.isTyping = false; fadeHintLater(); }
+        });
+
+        const touchZone = document.getElementById('touch-zone-left');
+        const joyBase = document.getElementById('joystick-base');
+        const joyThumb = document.getElementById('joystick-thumb');
+        let joyId = null, startX=0, startY=0;
+
+        touchZone.addEventListener('touchstart', e => {
+            e.preventDefault();
+            const t = e.changedTouches[0]; joyId = t.identifier; startX = t.clientX; startY = t.clientY;
+            joyBase.style.display = 'block'; joyBase.style.left = (startX-60)+'px'; joyBase.style.top = (startY-60)+'px';
+        }, {passive:false});
+
+        touchZone.addEventListener('touchmove', e => {
+            e.preventDefault();
+            for(let i=0; i<e.changedTouches.length; i++) {
+                if(e.changedTouches[i].identifier === joyId) {
+                    let t = e.changedTouches[i]; let dx = t.clientX - startX; let dy = t.clientY - startY;
+                    const maxDist = 60; const dist = Math.sqrt(dx*dx + dy*dy);
+                    if(dist > maxDist) { const ratio = maxDist / dist; dx *= ratio; dy *= ratio; }
+                    joyThumb.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+                    inputState.joySteer = -(dx / 60); inputState.joyThrottle = -(dy / 60); 
+                }
+            }
+        }, {passive:false});
+
+        touchZone.addEventListener('touchend', e => {
+            e.preventDefault(); joyId = null; joyBase.style.display = 'none'; 
+            inputState.joySteer = 0; inputState.joyThrottle = 0;
+        });
+
+        const bindBtn = (id, prop) => {
+            const b = document.getElementById(id);
+            b.addEventListener('touchstart', (e)=>{e.preventDefault(); inputState[prop]=true; b.style.transform='scale(0.9)';}, {passive:false});
+            b.addEventListener('touchend', (e)=>{e.preventDefault(); inputState[prop]=false; b.style.transform='scale(1)';});
+        };
+        bindBtn('btn-gas', 'boostBtn'); 
+        bindBtn('btn-jump', 'touchJump');
+
+        inputState.update = () => {
+            let th = 0, st = 0;
+            if(keys['KeyW']) th = 1; if(keys['KeyS']) th = -1;
+            if(keys['KeyA']) st = 1; if(keys['KeyD']) st = -1;
+            inputState.throttle = th; inputState.steerKey = st;
+            inputState.boost = keys['ShiftLeft']; inputState.jump = keys['Space'] || inputState.touchJump;
+            
+            if(document.body.classList.contains('touch-active')) {
+                if (Math.abs(inputState.joyThrottle) > 0.1) inputState.throttle = inputState.joyThrottle;
+                if (Math.abs(inputState.joySteer) > 0.1) inputState.steerKey = inputState.joySteer;
+                inputState.boost = inputState.boostBtn;
+            }
+        };
+    }
+
+    function createExplosion(pos, colorHex) {
+        if (!CONFIG.vfxEnabled) return;
+        const particleCount = 80;
+        const geometry = new THREE.BufferGeometry();
+        const positions = [];
+        const velocities = [];
+        const colors = [];
+        const baseColor = new THREE.Color(colorHex);
+        for (let i = 0; i < particleCount; i++) {
+            positions.push(pos.x, pos.y, pos.z);
+            const theta = Math.random() * Math.PI * 2;
+            const phi = Math.random() * Math.PI * 0.8;
+            const speed = Math.random() * 25 + 10;
+            velocities.push(speed * Math.sin(phi) * Math.cos(theta), speed * Math.cos(phi) + 10, speed * Math.sin(phi) * Math.sin(theta));
+            colors.push(baseColor.r, baseColor.g, baseColor.b);
+        }
+        geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+        geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+        const material = new THREE.PointsMaterial({ size: 1.2, vertexColors: true, transparent: true, opacity: 1, blending: THREE.AdditiveBlending });
+        const ps = new THREE.Points(geometry, material);
+        scene.add(ps);
+        particles.push({ mesh: ps, vels: velocities, life: 1.2 });
+    }
+
+    function updateParticles(dt) {
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i]; p.life -= dt; 
+            if (p.life <= 0) {
+                scene.remove(p.mesh); p.mesh.geometry.dispose(); p.mesh.material.dispose();
+                particles.splice(i, 1); continue;
+            }
+            const positions = p.mesh.geometry.attributes.position.array;
+            for (let j = 0; j < p.vels.length; j += 3) {
+                positions[j] += p.vels[j] * dt; positions[j+1] += p.vels[j+1] * dt; positions[j+2] += p.vels[j+2] * dt;
+                p.vels[j+1] -= 50 * dt; 
+                if (positions[j+1] < 0) { positions[j+1] = 0; p.vels[j+1] *= -0.5; }
+            }
+            p.mesh.geometry.attributes.position.needsUpdate = true;
+            p.mesh.material.opacity = Math.max(0, p.life);
+            p.mesh.scale.setScalar(1 + (1.2 - p.life));
+        }
+    }
+
+    function updatePhysics(dt) {
+        if(!playerCar || !aiCar) return;
+        inputState.update();
+        gameState.gameTime += dt;
+        
+        if (!inputState.boost && gameState.p1Boost < 100) {
+            gameState.p1Boost = Math.min(100, gameState.p1Boost + CONFIG.boostRegen * dt);
+        }
+
+        applyControl(playerCar, inputState.throttle, inputState.steerKey, inputState.boost, inputState.jump, dt, true);
+        // [修復] 補回 AI 更新調用
+        updateAI();
+
+        checkReset(playerCar.chassisBody, 0, 3, 30);
+        
+        const aiPos = aiCar.chassisBody.position;
+        if (Math.abs(aiPos.x) > 58 || Math.abs(aiPos.z) > 88) {
+            const correction = new CANNON.Vec3(-aiPos.x * 0.1, 0, -aiPos.z * 0.1);
+            aiCar.chassisBody.applyImpulse(correction, aiPos);
+        }
+        checkReset(aiCar.chassisBody, 0, 3, -30, Math.PI);
+        checkReset(ball.body, 0, 10, 0);
+        checkGoals();
+    }
+
+    function applyControl(carObj, throttle, steerInput, isBoost, isJump, dt = 1/60, isPlayer = false) {
+        const v = carObj.vehicle; const b = carObj.chassisBody;
+        const steer = steerInput * 0.6;
+        v.setSteeringValue(steer, 0); v.setSteeringValue(steer, 1);
+
+        let force = throttle * CONFIG.enginePower;
+        let isBoostingNow = false;
+
+        if (isPlayer) {
+            const localVel = b.quaternion.inverse().vmult(b.velocity);
+            const speedForward = -localVel.z; 
+            if (isBoost && throttle > 0 && gameState.p1Boost > 0) {
+                force *= CONFIG.boostMulti; isBoostingNow = true;
+                gameState.p1Boost = Math.max(0, gameState.p1Boost - CONFIG.boostConsumption * dt);
+            } else {
+                if (throttle > 0 && speedForward > CONFIG.baseSpeedLimit) force = 0;
+                else if (throttle < 0 && speedForward < -CONFIG.baseSpeedLimit) force = 0;
+            }
+        } else {
+            if (isBoost) force *= CONFIG.boostMulti;
+        }
+
+        if (Math.abs(throttle) < 0.1) {
+            for(let i=0; i<4; i++) { v.setBrake(20, i); v.applyEngineForce(0, i); }
+        } else {
+            for(let i=0; i<4; i++) { v.setBrake(0, i); v.applyEngineForce(force, i); }
+        }
+
+        if(carObj.booster && CONFIG.vfxEnabled) {
+            const currentSpeed = b.velocity.length();
+            const isGasActive = (throttle > 0 && currentSpeed < CONFIG.baseSpeedLimit);
+            carObj.booster.visible = isBoostingNow || isGasActive;
+            if(carObj.booster.visible) {
+                const scale = isBoostingNow ? (Math.random()*0.5 + 1.2) : (Math.random()*0.2 + 0.8);
+                carObj.booster.scale.setScalar(scale);
+            }
+        }
+
+        if(isJump && carObj.canJump) {
+            let onGround = false;
+            for(let i=0; i<v.wheelInfos.length; i++) {
+                if(v.wheelInfos[i].raycastResult.numHits > 0) onGround = true;
+            }
+            if(!onGround && b.position.y < 1.5) {
+                const up = new CANNON.Vec3(0,1,0); const localUp = new CANNON.Vec3(0,1,0); 
+                b.quaternion.vmult(localUp, localUp);
+                if(localUp.y > 0.8) onGround = true;
+            }
+            if(onGround) {
+                b.applyImpulse(new CANNON.Vec3(0, CONFIG.jumpImpulse, 0), b.position);
+                carObj.canJump = false; setTimeout(()=>carObj.canJump=true, 800); 
+            } else {
+                const up = new CANNON.Vec3(0,1,0); b.quaternion.vmult(up, up);
+                if(up.y < 0.5) { b.torque.x += 6000; b.torque.z += 6000; }
+            }
+        }
+    }
+
+    // [修復] 補回 updateAI 函數
+    function updateAI() {
+        const aiBody = aiCar.chassisBody;
+        const ballPos = ball.body.position;
+        const targetGoalZ = 93;
+        const vecToGoal = new CANNON.Vec3(0, 0, targetGoalZ).vsub(ballPos);
+        vecToGoal.normalize();
+        const idealPos = ballPos.vsub(vecToGoal.scale(8)); 
+        const toIdeal = idealPos.vsub(aiBody.position);
+        const localIdeal = aiBody.quaternion.inverse().vmult(toIdeal);
+        
+        let th = 0, st = 0;
+        if (localIdeal.z < 0) { th = 1; st = localIdeal.x / 10; } 
+        else { th = -0.6; st = -localIdeal.x / 10; }
+
+        const distToBall = ballPos.distanceTo(aiBody.position);
+        let boost = false;
+        if (distToBall < 20 && Math.abs(localIdeal.x) < 2 && localIdeal.z < 0) {
+            th = 1.0; 
+            boost = true;
+        }
+
+        if (Math.abs(aiBody.position.x) > 50) st = (aiBody.position.x > 0) ? -1 : 1;
+
+        applyControl(aiCar, th, Math.max(-1, Math.min(1, st)), boost, false);
+    }
+
+    function checkReset(body, x, y, z, rot=0) {
+        if(body.position.y < -5 || Math.abs(body.position.z) > 130) {
+            body.position.set(x, y, z);
+            body.velocity.set(0,0,0); body.angularVelocity.set(0,0,0);
+            body.quaternion.setFromAxisAngle(new CANNON.Vec3(0,1,0), rot);
+        }
+    }
+
+    function showGoalEffect(text, color, goalPos) {
+        const overlay = document.getElementById('goal-overlay');
+        const txt = document.getElementById('goal-text');
+        txt.innerText = text; txt.style.color = color; overlay.style.opacity = 1;
+        txt.classList.remove('goal-anim'); void txt.offsetWidth; txt.classList.add('goal-anim');
+        createExplosion(goalPos, color);
+        setTimeout(() => { overlay.style.opacity = 0; }, 2000);
+    }
+    
+    function animateScore(boxId, colorClass, newScore) {
+        const box = document.getElementById(boxId);
+        const oldDigit = box.querySelector('.score-digit');
+        if(oldDigit) {
+            oldDigit.classList.add('slide-out-up'); setTimeout(() => oldDigit.remove(), 500);
+        }
+        const newDigit = document.createElement('div');
+        newDigit.className = `score-digit ${colorClass} slide-in-up`;
+        newDigit.innerText = newScore;
+        box.appendChild(newDigit);
+    }
+
+    function checkGoals() {
+        if (isGoalScored) return; 
+        if(Math.abs(ball.body.position.x) < 15) {
+            if(ball.body.position.z > 90) { 
+                gameState.scoreAI++;
+                animateScore('score-cpu-box', 'cpu-color', gameState.scoreAI);
+                showGoalEffect("AI SCORED!", "#1e90ff", new THREE.Vector3(0, 5, 93));
+                
+                // [新增] 進球自動存檔
+                playerData.totalGoals++;
+                playerData.level = Math.floor(playerData.totalGoals / 5) + 1;
+                saveGameToDrive(); // 非同步存檔
+                
+                handleGoal();
+            }
+            else if(ball.body.position.z < -90) { 
+                gameState.scoreP1++; 
+                animateScore('score-p1-box', 'p1-color', gameState.scoreP1);
+                showGoalEffect("YOU SCORED!", "#ff4757", new THREE.Vector3(0, 5, -93));
+                
+                // [新增] 進球自動存檔
+                playerData.totalWins++;
+                playerData.totalGoals++;
+                playerData.level = Math.floor(playerData.totalGoals / 5) + 1;
+                saveGameToDrive();
+
+                handleGoal();
+            }
+        }
+    }
+
+    function handleGoal() {
+        isGoalScored = true;
+        setTimeout(resetRound, 2000);
+    }
+
+    function resetRound() {
+        isGoalScored = false;
+        ball.body.position.set(0, 10, 0); ball.body.velocity.set(0,0,0); ball.body.angularVelocity.set(0,0,0);
+        checkReset(playerCar.chassisBody, 0, 3, 30);
+        checkReset(aiCar.chassisBody, 0, 3, -30, Math.PI);
+        gameState.p1Boost = 100;
+    }
+
+    function updateLabels() {
+        if(!playerCar) return;
+        const up = (body, id) => {
+            const el = document.getElementById(id);
+            const pos = new THREE.Vector3(body.position.x, body.position.y+2, body.position.z);
+            pos.project(camera);
+            if(pos.z < 1) {
+                const x = (pos.x * .5 + .5) * window.innerWidth;
+                const y = (-pos.y * .5 + .5) * window.innerHeight;
+                el.style.display = 'block'; el.style.left = x+'px'; el.style.top = y+'px';
+            } else el.style.display = 'none';
+        };
+        if(playerCar) up(playerCar.chassisBody, 'p1-label');
+        if(aiCar) up(aiCar.chassisBody, 'cpu-label');
+        
+        if(playerCar) {
+            document.getElementById('speed-val').innerText = Math.round(playerCar.chassisBody.velocity.length() * 3.6);
+            document.getElementById('boost-bar').style.transform = `scaleX(${gameState.p1Boost / 100})`;
+        }
+    }
+
+    function animate() {
+        requestAnimationFrame(animate);
+        if(!isGameRunning) return; 
+
+        const dt = Math.min(clock.getDelta(), 0.1);
+        world.step(1/60, dt, 10);
+        
+        updatePhysics(dt);
+        updateParticles(dt); 
+        
+        const sync = (o) => {
+            o.mesh.position.copy(o.chassisBody.position); o.mesh.quaternion.copy(o.chassisBody.quaternion);
+            for(let i=0; i<4; i++) {
+                o.vehicle.updateWheelTransform(i);
+                o.wheelMeshes[i].position.copy(o.vehicle.wheelInfos[i].worldTransform.position);
+                o.wheelMeshes[i].quaternion.copy(o.vehicle.wheelInfos[i].worldTransform.quaternion);
+            }
+        };
+        if(playerCar) sync(playerCar); if(aiCar) sync(aiCar);
+        ball.mesh.position.copy(ball.body.position); ball.mesh.quaternion.copy(ball.body.quaternion);
+
+        if(playerCar) {
+            const p = playerCar.chassisBody.position;
+            const q = playerCar.chassisBody.quaternion;
+            const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(q);
+            forward.y = 0; if (forward.lengthSq() > 0.01) forward.normalize(); else forward.set(0,0,-1);
+
+            const speedKmh = playerCar.chassisBody.velocity.length() * 3.6;
+            const targetFov = 75 + Math.max(0, (speedKmh - 70) * CONFIG.fovSens); 
+            camera.fov = THREE.MathUtils.lerp(camera.fov, Math.min(120, targetFov), 0.1);
+            camera.updateProjectionMatrix();
+
+            const targetPos = new THREE.Vector3().copy(p).sub(forward.clone().multiplyScalar(CONFIG.camDist)).add(new THREE.Vector3(0, CONFIG.camHeight, 0));
+            camera.position.lerp(targetPos, 0.1);
+            const lookTarget = new THREE.Vector3().copy(p).add(forward.multiplyScalar(20));
+            camera.lookAt(lookTarget);
+        }
+        
+        updateLabels();
+        renderer.render(scene, camera);
+    }
+
+    function onResize() {
+        camera.aspect = window.innerWidth/window.innerHeight; camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+</script>
+</body>
+</html>
